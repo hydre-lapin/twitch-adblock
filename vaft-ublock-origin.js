@@ -128,13 +128,16 @@ twitch-videoad.js application/javascript
             constructor(twitchBlobUrl, options) {
                 let isTwitchWorker = false;
                 try {
-                    isTwitchWorker = new URL(twitchBlobUrl).origin.endsWith('.twitch.tv') || twitchBlobUrl.startsWith('blob:');
+                    const urlStr = String(twitchBlobUrl || '');
+                    isTwitchWorker = urlStr.includes('twitch.tv') || urlStr.startsWith('blob:') || !urlStr.startsWith('http');
                 } catch { }
 
                 if (!isTwitchWorker) {
                     super(twitchBlobUrl, options);
                     return;
                 }
+
+                console.log('[VAFT] Hooked Twitch Web Worker:', String(twitchBlobUrl).substring(0, 40));
 
                 const newBlobStr = `
                     const pendingFetchRequests = new Map();
@@ -916,17 +919,18 @@ twitch-videoad.js application/javascript
     }
 
     function updateAdblockBanner(data) {
-        const playerRootDiv = document.querySelector('.video-player') ||
-                              document.querySelector('[data-a-target="video-player"]') ||
-                              document.querySelector('.video-player__container') ||
-                              document.querySelector('.highwinds-player');
-        if (!playerRootDiv) return;
-
-        let adBlockDiv = playerRootDiv.querySelector('.adblock-overlay');
+        let adBlockDiv = document.querySelector('.adblock-overlay');
         if (!adBlockDiv) {
+            const playerRootDiv = document.querySelector('.video-player') ||
+                                  document.querySelector('[data-a-target="video-player"]') ||
+                                  document.querySelector('.video-player__container') ||
+                                  document.querySelector('.highwinds-player') ||
+                                  document.querySelector('main') ||
+                                  document.body;
+            if (!playerRootDiv) return;
             adBlockDiv = document.createElement('div');
             adBlockDiv.className = 'adblock-overlay';
-            adBlockDiv.innerHTML = '<div class="player-adblock-notice" style="color: #00f0ff; background-color: rgba(10, 10, 20, 0.85); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; position: absolute; top: 12px; left: 12px; padding: 6px 12px; font-family: sans-serif; font-size: 13px; font-weight: 500; pointer-events: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.5);"><p style="margin: 0;"></p></div>';
+            adBlockDiv.innerHTML = '<div class="player-adblock-notice" style="color: #00f0ff; background-color: rgba(10, 10, 20, 0.85); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; position: absolute; top: 12px; left: 12px; padding: 6px 12px; font-family: sans-serif; font-size: 13px; font-weight: 500; pointer-events: none; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.5);"><p style="margin: 0;"></p></div>';
             adBlockDiv.style.display = 'none';
             playerRootDiv.appendChild(adBlockDiv);
         }
@@ -935,7 +939,7 @@ twitch-videoad.js application/javascript
         if (pElem && data) {
             isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
             pElem.textContent = '🛡️ Blocage des pubs' + (data.isMidroll ? ' midroll' : '') + (data.isStrippingAdSegments ? ' (flux assaini)' : ' (flux direct)');
-            adBlockDiv.style.display = data.hasAds && playerBufferState.isLive ? 'block' : 'none';
+            adBlockDiv.style.display = data.hasAds ? 'block' : 'none';
         }
     }
 
@@ -1248,12 +1252,16 @@ twitch-videoad.js application/javascript
         window.addEventListener('DOMContentLoaded', onContentLoaded, { once: true });
     }
 
-    window.simulateAds = (depth) => {
-        if (depth === undefined || depth < 0) {
+    window.simulateAds = (depth = 1) => {
+        if (depth < 0) {
             console.log('[VAFT] Ad depth required (0 = no simulated ad, 1+ = use backup player for given depth)');
             return;
         }
+        SimulatedAdsDepth = depth;
+        console.log(`[VAFT] Triggering SimulatedAds (depth: ${depth}) on ${twitchWorkers.length} worker(s)`);
         postTwitchWorkerMessage('SimulateAds', depth);
+        updateAdblockBanner({ hasAds: depth > 0, isMidroll: false, isStrippingAdSegments: false });
+        return `[VAFT] Simulation d'annonces: ${depth > 0 ? 'ACTIVÉE (niveau ' + depth + ')' : 'DÉSACTIVÉE'} (${twitchWorkers.length} worker(s) connectés)`;
     };
 
     window.allSegmentsAreAdSegments = () => {
