@@ -205,9 +205,14 @@ twitch-videoad.js application/javascript
 
                     hookWorkerFetch();
                     try {
-                        (0, eval)(workerString);
+                        importScripts(${JSON.stringify(twitchBlobUrl)});
                     } catch (err) {
-                        console.error('[VAFT] Failed to execute worker script:', err);
+                        try {
+                            const workerString = getWasmWorkerJs(${JSON.stringify(twitchBlobUrl)});
+                            (0, eval)(workerString);
+                        } catch (err2) {
+                            console.error('[VAFT] Failed to execute worker script:', err2);
+                        }
                     }
                 `;
 
@@ -481,7 +486,7 @@ twitch-videoad.js application/javascript
                 .replace(/(X-TV-TWITCH-AD-URL=")[^"]*(")/g, `$1${newAdUrl}$2`)
                 .replace(/(X-TV-TWITCH-AD-CLICK-TRACKING-URL=")[^"]*(")/g, `$1${newAdUrl}$2`);
 
-            if (i < lines.length - 1 && line.startsWith('#EXTINF') && (!line.includes(',live') || stripAllSegments || AllSegmentsAreAdSegments)) {
+            if (i < lines.length - 1 && line.startsWith('#EXTINF') && (!line.includes(',live') && !line.includes(', live') || stripAllSegments || AllSegmentsAreAdSegments)) {
                 const segmentUrl = lines[i + 1]?.trim();
                 if (segmentUrl && !AdSegmentCache.has(segmentUrl)) {
                     if (streamInfo) streamInfo.NumStrippedAdSegments++;
@@ -492,7 +497,7 @@ twitch-videoad.js application/javascript
                 hasStrippedAdSegments = true;
             }
 
-            if (line.includes(AdSignifier)) {
+            if (line.includes(AdSignifier) || line.includes('stitched-ad') || line.includes('X-TV-TWITCH-AD') || line.includes('Amazon') || line.includes('commercial') || line.includes('#EXT-X-DATERANGE')) {
                 hasStrippedAdSegments = true;
             }
             lines[i] = line;
@@ -500,7 +505,7 @@ twitch-videoad.js application/javascript
 
         if (hasStrippedAdSegments) {
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith('#EXT-X-TWITCH-PREFETCH:')) {
+                if (lines[i].startsWith('#EXT-X-TWITCH-PREFETCH:') || lines[i].startsWith('#EXT-X-DATERANGE:ID="stitched-ad')) {
                     lines[i] = '';
                 }
             }
@@ -567,9 +572,26 @@ twitch-videoad.js application/javascript
             streamInfo.LastPlayerReload = Date.now();
         }
 
-        const haveAdTags = textStr.includes(AdSignifier) || SimulatedAdsDepth > 0;
+        const lines = textStr.replace(/\r/g, '').split('\n');
+        let hasNonLiveExtinf = false;
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXTINF') && !lines[i].includes(',live') && !lines[i].includes(', live')) {
+                hasNonLiveExtinf = true;
+                break;
+            }
+        }
+
+        const haveAdTags = textStr.includes(AdSignifier) ||
+                           textStr.includes('stitched-ad') ||
+                           textStr.includes('X-TV-TWITCH-AD') ||
+                           textStr.includes('Amazon') ||
+                           textStr.includes('commercial') ||
+                           textStr.includes('#EXT-X-DATERANGE:ID="') ||
+                           hasNonLiveExtinf ||
+                           SimulatedAdsDepth > 0;
+
         if (haveAdTags) {
-            streamInfo.IsMidroll = textStr.includes('"MIDROLL"') || textStr.includes('"midroll"');
+            streamInfo.IsMidroll = textStr.includes('"MIDROLL"') || textStr.includes('"midroll"') || textStr.includes('MIDROLL');
             if (!streamInfo.IsShowingAd) {
                 streamInfo.IsShowingAd = true;
                 postMessage({
@@ -581,12 +603,11 @@ twitch-videoad.js application/javascript
             }
 
             if (!streamInfo.IsMidroll) {
-                const lines = textStr.replace(/\r/g, '').split('\n');
                 for (let i = 0; i < lines.length; i++) {
                     const line = lines[i];
                     if (line.startsWith('#EXTINF') && lines.length > i + 1) {
                         const nextLine = lines[i + 1]?.trim();
-                        if (nextLine && !line.includes(',live') && !streamInfo.RequestedAds.has(nextLine)) {
+                        if (nextLine && !line.includes(',live') && !line.includes(', live') && !streamInfo.RequestedAds.has(nextLine)) {
                             streamInfo.RequestedAds.add(nextLine);
                             realFetch(nextLine).catch(() => {});
                             break;
