@@ -900,7 +900,10 @@
     }
 
     function updateAdblockBanner(data) {
-        const playerRootDiv = document.querySelector('.video-player');
+        const playerRootDiv = document.querySelector('.video-player') ||
+                              document.querySelector('[data-a-target="video-player"]') ||
+                              document.querySelector('.video-player__container') ||
+                              document.querySelector('.highwinds-player');
         if (!playerRootDiv) return;
 
         let adBlockDiv = playerRootDiv.querySelector('.adblock-overlay');
