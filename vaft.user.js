@@ -1,4 +1,13 @@
-twitch-videoad.js application/javascript
+// ==UserScript==
+// @name         Twitch Ad Solutions (VAFT) - Userscript
+// @namespace    https://github.com/hydre-lapin/twitch-adblock
+// @version      2.6.0
+// @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
+// @match        https://*.twitch.tv/*
+// @run-at       document-start
+// @grant        none
+// ==/UserScript==
+
 (function () {
     if (!/(^|\.)twitch\.tv$/.test(window.location.hostname)) {
         return;
@@ -24,9 +33,9 @@ twitch-videoad.js application/javascript
         scope.ForceAccessTokenPlayerType = 'popout';
         scope.SkipPlayerReloadOnHevc = false;
         scope.AlwaysReloadPlayerOnAd = false;
-        scope.ReloadPlayerAfterAd = false; // Smooth transition without black screen reload
+        scope.ReloadPlayerAfterAd = false;
         scope.PlayerReloadMinimalRequestsTime = 1500;
-        scope.PlayerReloadMinimalRequestsPlayerIndex = 2; // autoplay
+        scope.PlayerReloadMinimalRequestsPlayerIndex = 2;
         scope.HasTriggeredPlayerReload = false;
         scope.StreamInfos = new Map();
         scope.StreamInfosByUrl = new Map();
@@ -1029,7 +1038,8 @@ twitch-videoad.js application/javascript
 
     async function handleWorkerFetchRequest(fetchRequest) {
         try {
-            const response = await window.realFetch(fetchRequest.url, fetchRequest.options);
+            const fetchFn = window.realFetch || window.fetch;
+            const response = await fetchFn(fetchRequest.url, fetchRequest.options);
             const responseBody = await response.text();
             return {
                 id: fetchRequest.id,
