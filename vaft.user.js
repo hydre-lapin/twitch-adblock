@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Twitch Ad Solutions (VAFT) - Userscript
 // @namespace    https://github.com/hydre-lapin/twitch-adblock
-// @version      2.6.0
+// @version      2.7.0
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
-// @grant        unsafeWindow
+// @grant        none
+// @inject-into  page
 // ==/UserScript==
 
 (function () {
@@ -14,7 +15,7 @@
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 26;
+    const ourTwitchAdSolutionsVersion = 27;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -1277,16 +1278,25 @@
         window.addEventListener('DOMContentLoaded', onContentLoaded, { once: true });
     }
 
-    window.simulateAds = (depth = 1) => {
-        if (depth < 0) {
-            console.log('[VAFT] Ad depth required (0 = no simulated ad, 1+ = use backup player for given depth)');
-            return;
+    window.simulateAds = (depth = 1, timeoutSec = 10) => {
+        if (depth <= 0) {
+            SimulatedAdsDepth = 0;
+            postTwitchWorkerMessage('SimulateAds', 0);
+            updateAdblockBanner({ hasAds: false });
+            return `[VAFT] Simulation d'annonces DÉSACTIVÉE.`;
         }
         SimulatedAdsDepth = depth;
         console.log(`[VAFT] Triggering SimulatedAds (depth: ${depth}) on ${twitchWorkers.length} worker(s)`);
         postTwitchWorkerMessage('SimulateAds', depth);
-        updateAdblockBanner({ hasAds: depth > 0, isMidroll: false, isStrippingAdSegments: false });
-        return `[VAFT] Simulation d'annonces: ${depth > 0 ? 'ACTIVÉE (niveau ' + depth + ')' : 'DÉSACTIVÉE'} (${twitchWorkers.length} worker(s) connectés)`;
+        updateAdblockBanner({ hasAds: true, isMidroll: false, isStrippingAdSegments: false });
+        if (timeoutSec > 0) {
+            setTimeout(() => {
+                if (SimulatedAdsDepth === depth) {
+                    window.simulateAds(0);
+                }
+            }, timeoutSec * 1000);
+        }
+        return `[VAFT] Simulation d'annonces: ACTIVÉE (niveau ${depth}) - Arrêt auto dans ${timeoutSec}s (${twitchWorkers.length} worker(s) connectés)`;
     };
 
     window.allSegmentsAreAdSegments = () => {
