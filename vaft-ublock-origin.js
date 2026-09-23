@@ -306,23 +306,7 @@ twitch-videoad.js application/javascript
                 }
 
                 const cleanUrl = url.trimEnd();
-                if (cleanUrl.endsWith('.m3u8') || cleanUrl.includes('.m3u8?')) {
-                    try {
-                        const response = await realFetch(url, options);
-                        if (response && response.status === 200) {
-                            const text = await response.text();
-                            const modified = await processM3U8(cleanUrl, text, realFetch);
-                            return new Response(modified, {
-                                status: response.status,
-                                statusText: response.statusText,
-                                headers: response.headers
-                            });
-                        }
-                        return response;
-                    } catch (err) {
-                        return realFetch(url, options);
-                    }
-                } else if (cleanUrl.includes('/channel/hls/') && !cleanUrl.includes('picture-by-picture')) {
+                if (cleanUrl.includes('/channel/hls/') && !cleanUrl.includes('picture-by-picture')) {
                     V2API = cleanUrl.includes('/api/v2/');
 
                     let channelName = null;
@@ -460,6 +444,22 @@ twitch-videoad.js application/javascript
                     } catch (err) {
                         return realFetch(url, options);
                     }
+                } else if (cleanUrl.endsWith('.m3u8') || cleanUrl.includes('.m3u8?')) {
+                    try {
+                        const response = await realFetch(url, options);
+                        if (response && response.status === 200) {
+                            const text = await response.text();
+                            const modified = await processM3U8(cleanUrl, text, realFetch);
+                            return new Response(modified, {
+                                status: response.status,
+                                statusText: response.statusText,
+                                headers: response.headers
+                            });
+                        }
+                        return response;
+                    } catch (err) {
+                        return realFetch(url, options);
+                    }
                 }
             }
             return realFetch.apply(this, arguments);
@@ -572,14 +572,15 @@ twitch-videoad.js application/javascript
     }
 
     async function processM3U8(url, textStr, realFetch) {
-        const streamInfo = StreamInfosByUrl instanceof Map ? StreamInfosByUrl.get(url) : StreamInfosByUrl[url];
+        let streamInfo = StreamInfosByUrl instanceof Map ? StreamInfosByUrl.get(url) : StreamInfosByUrl?.[url];
         if (!streamInfo) {
-            return textStr;
-        }
-
-        if (HasTriggeredPlayerReload) {
-            HasTriggeredPlayerReload = false;
-            streamInfo.LastPlayerReload = Date.now();
+            for (const info of (StreamInfos instanceof Map ? StreamInfos.values() : Object.values(StreamInfos || {}))) {
+                if (info?.Urls && info.Urls[url]) {
+                    streamInfo = info;
+                    if (StreamInfosByUrl instanceof Map) StreamInfosByUrl.set(url, info);
+                    break;
+                }
+            }
         }
 
         const lines = textStr.replace(/\r/g, '').split('\n');
@@ -599,6 +600,18 @@ twitch-videoad.js application/javascript
                            textStr.includes('#EXT-X-DATERANGE:ID="') ||
                            hasNonLiveExtinf ||
                            SimulatedAdsDepth > 0;
+
+        if (!streamInfo) {
+            if (haveAdTags || IsAdStrippingEnabled) {
+                return stripAdSegments(textStr, false, null);
+            }
+            return textStr;
+        }
+
+        if (HasTriggeredPlayerReload) {
+            HasTriggeredPlayerReload = false;
+            streamInfo.LastPlayerReload = Date.now();
+        }
 
         if (haveAdTags) {
             streamInfo.IsMidroll = textStr.includes('"MIDROLL"') || textStr.includes('"midroll"') || textStr.includes('MIDROLL');
