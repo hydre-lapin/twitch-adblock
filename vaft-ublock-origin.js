@@ -247,22 +247,29 @@ twitch-videoad.js application/javascript
         };
 
         let workerInstance = reinsertWorkers(newWorker, reinsert);
-        try {
-            Object.defineProperty(window, 'Worker', {
-                get: function () {
-                    return workerInstance;
-                },
-                set: function (value) {
-                    if (isValidWorker(value)) {
-                        workerInstance = value;
-                    } else {
-                        console.log('[VAFT] Attempt to override Worker with untrusted instance denied');
-                    }
-                },
-                configurable: true
-            });
-        } catch (e) {
-            window.Worker = workerInstance;
+        const targetWindows = [window];
+        if (typeof unsafeWindow !== 'undefined' && unsafeWindow !== window) {
+            targetWindows.push(unsafeWindow);
+        }
+
+        for (const targetWin of targetWindows) {
+            try {
+                Object.defineProperty(targetWin, 'Worker', {
+                    get: function () {
+                        return workerInstance;
+                    },
+                    set: function (value) {
+                        if (isValidWorker(value)) {
+                            workerInstance = value;
+                        } else {
+                            console.log('[VAFT] Attempt to override Worker with untrusted instance denied');
+                        }
+                    },
+                    configurable: true
+                });
+            } catch (e) {
+                try { targetWin.Worker = workerInstance; } catch {}
+            }
         }
     }
 
@@ -1097,70 +1104,77 @@ twitch-videoad.js application/javascript
     }
 
     function hookFetch() {
-        const realFetch = window.fetch;
-        window.realFetch = realFetch;
+        const targetWindows = [window];
+        if (typeof unsafeWindow !== 'undefined' && unsafeWindow !== window) {
+            targetWindows.push(unsafeWindow);
+        }
 
-        window.fetch = function (url, init, ...args) {
-            if (typeof url === 'string' && url.includes('gql')) {
-                const headers = init?.headers;
-                if (headers) {
-                    const deviceId = getHeaderValue(headers, 'X-Device-Id') || getHeaderValue(headers, 'Device-ID');
-                    if (deviceId && GQLDeviceID !== deviceId) {
-                        GQLDeviceID = deviceId;
-                        postTwitchWorkerMessage('UpdateDeviceId', GQLDeviceID);
-                    }
+        for (const targetWin of targetWindows) {
+            const realFetch = targetWin.fetch;
+            targetWin.realFetch = realFetch;
 
-                    const clientVer = getHeaderValue(headers, 'Client-Version');
-                    if (clientVer && clientVer !== ClientVersion) {
-                        ClientVersion = clientVer;
-                        postTwitchWorkerMessage('UpdateClientVersion', ClientVersion);
-                    }
-
-                    const clientSess = getHeaderValue(headers, 'Client-Session-Id');
-                    if (clientSess && clientSess !== ClientSession) {
-                        ClientSession = clientSess;
-                        postTwitchWorkerMessage('UpdateClientSession', ClientSession);
-                    }
-
-                    const clientInteg = getHeaderValue(headers, 'Client-Integrity');
-                    if (clientInteg && clientInteg !== ClientIntegrityHeader) {
-                        ClientIntegrityHeader = clientInteg;
-                        postTwitchWorkerMessage('UpdateClientIntegrityHeader', ClientIntegrityHeader);
-                    }
-
-                    const auth = getHeaderValue(headers, 'Authorization');
-                    if (auth && auth !== AuthorizationHeader) {
-                        AuthorizationHeader = auth;
-                        postTwitchWorkerMessage('UpdateAuthorizationHeader', AuthorizationHeader);
-                    }
-                }
-
-                if (init && typeof init.body === 'string' && init.body.includes('PlaybackAccessToken')) {
-                    try {
-                        let replaced = false;
-                        const parsedBody = JSON.parse(init.body);
-                        const items = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
-
-                        for (const item of items) {
-                            const hash = item?.extensions?.persistedQuery?.sha256Hash;
-                            if (hash && hash !== PlaybackAccessTokenSha256) {
-                                PlaybackAccessTokenSha256 = hash;
-                                postTwitchWorkerMessage('UpdatePlaybackAccessTokenSha256', PlaybackAccessTokenSha256);
-                            }
-                            if (ForceAccessTokenPlayerType && item?.variables?.playerType && item.variables.playerType !== ForceAccessTokenPlayerType) {
-                                item.variables.playerType = ForceAccessTokenPlayerType;
-                                replaced = true;
-                            }
+            targetWin.fetch = function (url, init, ...args) {
+                if (typeof url === 'string' && url.includes('gql')) {
+                    const headers = init?.headers;
+                    if (headers) {
+                        const deviceId = getHeaderValue(headers, 'X-Device-Id') || getHeaderValue(headers, 'Device-ID');
+                        if (deviceId && GQLDeviceID !== deviceId) {
+                            GQLDeviceID = deviceId;
+                            postTwitchWorkerMessage('UpdateDeviceId', GQLDeviceID);
                         }
 
-                        if (replaced) {
-                            init.body = JSON.stringify(Array.isArray(parsedBody) ? items : items[0]);
+                        const clientVer = getHeaderValue(headers, 'Client-Version');
+                        if (clientVer && clientVer !== ClientVersion) {
+                            ClientVersion = clientVer;
+                            postTwitchWorkerMessage('UpdateClientVersion', ClientVersion);
                         }
-                    } catch {}
+
+                        const clientSess = getHeaderValue(headers, 'Client-Session-Id');
+                        if (clientSess && clientSess !== ClientSession) {
+                            ClientSession = clientSess;
+                            postTwitchWorkerMessage('UpdateClientSession', ClientSession);
+                        }
+
+                        const clientInteg = getHeaderValue(headers, 'Client-Integrity');
+                        if (clientInteg && clientInteg !== ClientIntegrityHeader) {
+                            ClientIntegrityHeader = clientInteg;
+                            postTwitchWorkerMessage('UpdateClientIntegrityHeader', ClientIntegrityHeader);
+                        }
+
+                        const auth = getHeaderValue(headers, 'Authorization');
+                        if (auth && auth !== AuthorizationHeader) {
+                            AuthorizationHeader = auth;
+                            postTwitchWorkerMessage('UpdateAuthorizationHeader', AuthorizationHeader);
+                        }
+                    }
+
+                    if (init && typeof init.body === 'string' && init.body.includes('PlaybackAccessToken')) {
+                        try {
+                            let replaced = false;
+                            const parsedBody = JSON.parse(init.body);
+                            const items = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+
+                            for (const item of items) {
+                                const hash = item?.extensions?.persistedQuery?.sha256Hash;
+                                if (hash && hash !== PlaybackAccessTokenSha256) {
+                                    PlaybackAccessTokenSha256 = hash;
+                                    postTwitchWorkerMessage('UpdatePlaybackAccessTokenSha256', PlaybackAccessTokenSha256);
+                                }
+                                if (ForceAccessTokenPlayerType && item?.variables?.playerType && item.variables.playerType !== ForceAccessTokenPlayerType) {
+                                    item.variables.playerType = ForceAccessTokenPlayerType;
+                                    replaced = true;
+                                }
+                            }
+
+                            if (replaced) {
+                                init.body = JSON.stringify(Array.isArray(parsedBody) ? items : items[0]);
+                            }
+                        } catch {}
+                    }
                 }
-            }
-            return realFetch.apply(this, arguments);
-        };
+                return realFetch.apply(this, arguments);
+            };
+        }
     }
 
     function onContentLoaded() {
