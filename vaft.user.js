@@ -5,7 +5,7 @@
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
-// @grant        none
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (function () {
@@ -15,11 +15,15 @@
     'use strict';
 
     const ourTwitchAdSolutionsVersion = 26;
-    if (typeof window.twitchAdSolutionsVersion !== 'undefined' && window.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
-        console.log(`[VAFT] Skipping as another version is already active (${window.twitchAdSolutionsVersion})`);
+    const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
+        console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
         return;
     }
     window.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion;
+    if (typeof unsafeWindow !== 'undefined') {
+        try { unsafeWindow.twitchAdSolutionsVersion = ourTwitchAdSolutionsVersion; } catch {}
+    }
 
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
@@ -1244,4 +1248,12 @@
     window.allSegmentsAreAdSegments = () => {
         postTwitchWorkerMessage('AllSegmentsAreAdSegments');
     };
+
+    if (typeof unsafeWindow !== 'undefined') {
+        try {
+            unsafeWindow.simulateAds = window.simulateAds;
+            unsafeWindow.allSegmentsAreAdSegments = window.allSegmentsAreAdSegments;
+            unsafeWindow.reloadTwitchPlayer = window.reloadTwitchPlayer;
+        } catch {}
+    }
 })();
