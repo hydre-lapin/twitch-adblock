@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Twitch Ad Solutions (VAFT) - Userscript
 // @namespace    https://github.com/hydre-lapin/twitch-adblock
-// @version      2.7.0
+// @version      2.8.0
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
 // @grant        none
 // @inject-into  page
+// @downloadURL  https://raw.githubusercontent.com/hydre-lapin/twitch-adblock/main/vaft.user.js
+// @updateURL    https://raw.githubusercontent.com/hydre-lapin/twitch-adblock/main/vaft.user.js
 // ==/UserScript==
 
 (function () {
@@ -15,7 +17,7 @@
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 27;
+    const ourTwitchAdSolutionsVersion = 28;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -29,6 +31,7 @@
     function declareOptions(scope) {
         scope.AdSignifier = 'stitched';
         scope.ClientID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+        scope.PlaybackAccessTokenSha256 = 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9';
         scope.BackupPlayerTypes = [
             'embed',
             'popout',
@@ -38,9 +41,10 @@
         scope.ForceAccessTokenPlayerType = 'popout';
         scope.SkipPlayerReloadOnHevc = false;
         scope.AlwaysReloadPlayerOnAd = false;
-        scope.ReloadPlayerAfterAd = false;
+        scope.ReloadPlayerAfterAd = false; // Seamless playback without black screen reload
+        scope.ShowAdBlockBanner = true; // Discreet glowing dot indicator during ads
         scope.PlayerReloadMinimalRequestsTime = 1500;
-        scope.PlayerReloadMinimalRequestsPlayerIndex = 2;
+        scope.PlayerReloadMinimalRequestsPlayerIndex = 2; // autoplay
         scope.HasTriggeredPlayerReload = false;
         scope.StreamInfos = new Map();
         scope.StreamInfosByUrl = new Map();
@@ -59,7 +63,6 @@
         scope.PlayerBufferingPrerollCheckEnabled = true;
         scope.PlayerBufferingPrerollCheckOffset = 3;
         scope.V2API = false;
-        scope.PlaybackAccessTokenSha256 = '0828119ded1c13477966434e15800ff57ddace7ba0e7726cbf5094f8116c41b';
         scope.IsAdStrippingEnabled = true;
         scope.AdSegmentCache = new Map();
         scope.AllSegmentsAreAdSegments = false;
@@ -131,9 +134,8 @@
     }
 
     function hookWindowWorker() {
-        const rootWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-        const reinsert = getWorkersForReinsert(rootWin.Worker);
-        const CleanWorker = getCleanWorker(rootWin.Worker) || rootWin.Worker;
+        const reinsert = getWorkersForReinsert(window.Worker);
+        const CleanWorker = getCleanWorker(window.Worker) || window.Worker;
 
         const newWorker = class Worker extends CleanWorker {
             constructor(twitchBlobUrl, options) {
@@ -148,7 +150,7 @@
                     return;
                 }
 
-                console.log('[VAFT] Hooked Twitch Web Worker:', String(twitchBlobUrl).substring(0, 50));
+                console.log('[VAFT] Hooked Twitch Web Worker:', String(twitchBlobUrl).substring(0, 40));
 
                 const newBlobStr = `
                     const pendingFetchRequests = new Map();
@@ -164,14 +166,13 @@
                     ${getServerTimeFromM3u8.toString()}
                     ${replaceServerTimeInM3u8.toString()}
 
-                    const workerString = getWasmWorkerJs(${JSON.stringify(twitchBlobUrl)});
                     declareOptions(self);
                     GQLDeviceID = ${JSON.stringify(GQLDeviceID || null)};
                     AuthorizationHeader = ${JSON.stringify(AuthorizationHeader || null)};
                     ClientIntegrityHeader = ${JSON.stringify(ClientIntegrityHeader || null)};
                     ClientVersion = ${JSON.stringify(ClientVersion || null)};
                     ClientSession = ${JSON.stringify(ClientSession || null)};
-                    PlaybackAccessTokenSha256 = ${JSON.stringify(PlaybackAccessTokenSha256 || '0828119ded1c13477966434e15800ff57ddace7ba0e7726cbf5094f8116c41b')};
+                    PlaybackAccessTokenSha256 = ${JSON.stringify(PlaybackAccessTokenSha256 || 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9')};
 
                     self.addEventListener('message', function(e) {
                         if (!e || !e.data) return;
@@ -219,11 +220,11 @@
 
                     hookWorkerFetch();
                     try {
-                        importScripts(${JSON.stringify(twitchBlobUrl)});
+                        const workerString = getWasmWorkerJs(${JSON.stringify(twitchBlobUrl)});
+                        (0, eval)(workerString);
                     } catch (err) {
                         try {
-                            const workerString = getWasmWorkerJs(${JSON.stringify(twitchBlobUrl)});
-                            (0, eval)(workerString);
+                            importScripts(${JSON.stringify(twitchBlobUrl)});
                         } catch (err2) {
                             console.error('[VAFT] Failed to execute worker script:', err2);
                         }
@@ -303,11 +304,12 @@
 
         function isAdSegmentUrl(targetUrl) {
             if (!targetUrl || typeof targetUrl !== 'string') return false;
-            if (AdSegmentCache.has(targetUrl)) return true;
-            for (const cachedUrl of AdSegmentCache.keys()) {
-                if (targetUrl.includes(cachedUrl) || cachedUrl.includes(targetUrl)) return true;
-            }
-            return false;
+            return AdSegmentCache.has(targetUrl) ||
+                   targetUrl.includes('stitched-ad') ||
+                   targetUrl.includes('/ad/') ||
+                   targetUrl.includes('twitch_ad') ||
+                   targetUrl.includes('amazon-adsystem') ||
+                   (AllSegmentsAreAdSegments && targetUrl.includes('.ts'));
         }
 
         fetch = async function (url, options) {
@@ -322,34 +324,28 @@
 
                     let channelName = null;
                     try {
-                        const pathSegments = new URL(cleanUrl).pathname.split('/');
-                        const lastSeg = pathSegments[pathSegments.length - 1];
-                        if (lastSeg) {
-                            channelName = lastSeg.replace(/\.m3u8.*$/, '');
-                        }
+                        const parsedUrl = new URL(url);
+                        const match = parsedUrl.pathname.match(/([^\/]+)(?=\.\w+$)/);
+                        if (match) channelName = match[0];
                     } catch {}
-                    if (!channelName) {
-                        const m = cleanUrl.match(/channel\/hls\/([^.\/?#]+)/i);
-                        channelName = m ? m[1] : 'unknown';
-                    }
 
-                    let effectiveUrl = cleanUrl;
+                    let finalUrl = url;
                     if (ForceAccessTokenPlayerType) {
                         try {
-                            const tempUrl = new URL(cleanUrl);
+                            const tempUrl = new URL(url);
                             tempUrl.searchParams.delete('parent_domains');
-                            effectiveUrl = tempUrl.toString();
+                            finalUrl = tempUrl.toString();
                         } catch {}
                     }
 
                     try {
-                        const response = await realFetch(effectiveUrl, options);
-                        if (response.status === 200) {
+                        const response = await realFetch(finalUrl, options);
+                        if (response && response.status === 200 && channelName) {
                             const encodingsM3u8 = await response.text();
                             const serverTime = getServerTimeFromM3u8(encodingsM3u8);
 
                             let streamInfo = StreamInfos instanceof Map ? StreamInfos.get(channelName) : StreamInfos[channelName];
-                            if (streamInfo?.EncodingsM3U8) {
+                            if (streamInfo && streamInfo.EncodingsM3U8) {
                                 const m3u8Match = streamInfo.EncodingsM3U8.match(/^https?:.*\.m3u8/m);
                                 if (m3u8Match) {
                                     try {
@@ -477,22 +473,19 @@
         };
     }
 
-    function getServerTimeFromM3u8(encodingsM3u8) {
-        if (!encodingsM3u8 || typeof encodingsM3u8 !== 'string') return null;
-        if (V2API) {
-            const matches = encodingsM3u8.match(/#EXT-X-SESSION-DATA:DATA-ID="SERVER-TIME",VALUE="([^"]+)"/);
-            return matches && matches[1] ? matches[1] : null;
-        }
-        const matches = encodingsM3u8.match(/SERVER-TIME="([0-9.]+)"/);
-        return matches && matches[1] ? matches[1] : null;
+    function getServerTimeFromM3u8(m3u8) {
+        if (!m3u8) return null;
+        const match = m3u8.match(/^#EXT-X-TWITCH-PREFETCH:https:.*_(\d+)_\d+\.ts/m);
+        if (match) return match[1];
+        const match2 = m3u8.match(/^https:.*_(\d+)_\d+\.ts/m);
+        return match2 ? match2[1] : null;
     }
 
-    function replaceServerTimeInM3u8(encodingsM3u8, newServerTime) {
-        if (!encodingsM3u8 || typeof encodingsM3u8 !== 'string' || !newServerTime) return encodingsM3u8;
-        if (V2API) {
-            return encodingsM3u8.replace(/(#EXT-X-SESSION-DATA:DATA-ID="SERVER-TIME",VALUE=")[^"]+(")/, `$1${newServerTime}$2`);
-        }
-        return encodingsM3u8.replace(/(SERVER-TIME=")[0-9.]+"/, `SERVER-TIME="${newServerTime}"`);
+    function replaceServerTimeInM3u8(m3u8, serverTime) {
+        if (!m3u8 || !serverTime) return m3u8;
+        return m3u8
+            .replace(/#EXT-X-TWITCH-PREFETCH:https:(.*_)\d+(_\d+\.ts)/g, `#EXT-X-TWITCH-PREFETCH:https:$1${serverTime}$2`)
+            .replace(/https:(.*_)\d+(_\d+\.ts)/g, `https:$1${serverTime}$2`);
     }
 
     function stripAdSegments(textStr, stripAllSegments, streamInfo) {
@@ -507,7 +500,17 @@
                 .replace(/(X-TV-TWITCH-AD-URL=")[^"]*(")/g, `$1${newAdUrl}$2`)
                 .replace(/(X-TV-TWITCH-AD-CLICK-TRACKING-URL=")[^"]*(")/g, `$1${newAdUrl}$2`);
 
-            if (i < lines.length - 1 && line.startsWith('#EXTINF') && (!line.includes(',live') && !line.includes(', live') || stripAllSegments || AllSegmentsAreAdSegments)) {
+            if (i < lines.length - 1 && lines[i + 1].startsWith('#EXT-X-DISCONTINUITY')) {
+                i++;
+                continue;
+            }
+
+            const isAdSegment = (stripAllSegments && line.includes('.ts')) ||
+                                (line.startsWith('#EXTINF') && !line.includes(',live') && !line.includes(', live')) ||
+                                line.includes('stitched-ad') ||
+                                line.includes('X-TV-TWITCH-AD');
+
+            if (isAdSegment) {
                 const segmentUrl = lines[i + 1]?.trim();
                 if (segmentUrl && !AdSegmentCache.has(segmentUrl)) {
                     if (streamInfo) streamInfo.NumStrippedAdSegments++;
@@ -745,7 +748,7 @@
                 textStr = backupM3u8;
                 if (streamInfo.ActiveBackupPlayerType !== backupPlayerType) {
                     streamInfo.ActiveBackupPlayerType = backupPlayerType;
-                    console.log(`[VAFT] Blocking ${(streamInfo.IsMidroll ? 'midroll ' : '')}ads with clean stream (${backupPlayerType})`);
+                    console.log(`[VAFT] Clean stream active (${backupPlayerType}) for ${streamInfo.ChannelName}`);
                 }
             }
 
@@ -781,15 +784,10 @@
     }
 
     function parseAttributes(str) {
-        if (!str || typeof str !== 'string') return {};
         const result = {};
-        const regex = /([A-Z0-9-]+)=(?:"([^"]*)"|([^,]+))/g;
-        let match;
-        while ((match = regex.exec(str)) !== null) {
-            const key = match[1];
-            const rawVal = match[2] !== undefined ? match[2] : match[3];
-            const num = Number(rawVal);
-            result[key] = !isNaN(num) && rawVal.trim() !== '' ? num : rawVal;
+        const matches = str.matchAll(/([A-Z0-9-]+)=("([^"]*)"|([^,]*))/g);
+        for (const match of matches) {
+            result[match[1]] = match[3] || match[4];
         }
         return result;
     }
@@ -808,7 +806,7 @@
             extensions: {
                 persistedQuery: {
                     version: 1,
-                    sha256Hash: PlaybackAccessTokenSha256 || '0828119ded1c13477966434e15800ff57ddace7ba0e7726cbf5094f8116c41b'
+                    sha256Hash: PlaybackAccessTokenSha256 || 'ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9'
                 }
             }
         };
@@ -835,18 +833,23 @@
         if (ClientVersion) headers['Client-Version'] = ClientVersion;
         if (ClientSession) headers['Client-Session-Id'] = ClientSession;
 
+        if (playerType === 'autoplay') {
+            headers['X-Device-Id'] = 'twitch-web';
+        }
+
+        const fetchRequest = {
+            url: 'https://gql.twitch.tv/gql',
+            options: {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(body)
+            }
+        };
+
         return new Promise((resolve, reject) => {
-            const requestId = Math.random().toString(36).substring(2, 15);
-            const fetchRequest = {
-                id: requestId,
-                url: 'https://gql.twitch.tv/gql',
-                options: {
-                    method: 'POST',
-                    body: JSON.stringify(body),
-                    headers
-                }
-            };
-            pendingFetchRequests.set(requestId, { resolve, reject });
+            const id = Math.random().toString(36).slice(2);
+            pendingFetchRequests.set(id, { resolve, reject });
+            fetchRequest.id = id;
             postMessage({
                 key: 'FetchRequest',
                 value: fetchRequest
@@ -950,8 +953,15 @@
     }
 
     function updateAdblockBanner(data) {
-        let adBlockDiv = document.querySelector('.adblock-overlay');
-        if (!adBlockDiv) {
+        if (!ShowAdBlockBanner) {
+            if (data) {
+                isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
+            }
+            return;
+        }
+
+        let adBlockDot = document.querySelector('.vaft-ad-indicator');
+        if (!adBlockDot) {
             const playerRootDiv = document.querySelector('.video-player') ||
                                   document.querySelector('[data-a-target="video-player"]') ||
                                   document.querySelector('.video-player__container') ||
@@ -959,18 +969,22 @@
                                   document.querySelector('main') ||
                                   document.body;
             if (!playerRootDiv) return;
-            adBlockDiv = document.createElement('div');
-            adBlockDiv.className = 'adblock-overlay';
-            adBlockDiv.innerHTML = '<div class="player-adblock-notice" style="color: #00f0ff; background-color: rgba(10, 10, 20, 0.85); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; position: absolute; top: 12px; left: 12px; padding: 6px 12px; font-family: sans-serif; font-size: 13px; font-weight: 500; pointer-events: none; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.5);"><p style="margin: 0;"></p></div>';
-            adBlockDiv.style.display = 'none';
-            playerRootDiv.appendChild(adBlockDiv);
+
+            adBlockDot = document.createElement('div');
+            adBlockDot.className = 'vaft-ad-indicator';
+            adBlockDot.title = 'Publicité en cours de contournement (VAFT)';
+            adBlockDot.style.cssText = 'width: 10px; height: 10px; background: #00f0ff; border-radius: 50%; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7); position: absolute; top: 16px; left: 16px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.4s ease;';
+            playerRootDiv.appendChild(adBlockDot);
         }
 
-        const pElem = adBlockDiv.querySelector('p');
-        if (pElem && data) {
+        if (data) {
             isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
-            pElem.textContent = '🛡️ Blocage des pubs' + (data.isMidroll ? ' midroll' : '') + (data.isStrippingAdSegments ? ' (flux assaini)' : ' (flux direct)');
-            adBlockDiv.style.display = data.hasAds ? 'block' : 'none';
+            if (data.hasAds) {
+                adBlockDot.style.opacity = '0.9';
+                adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
+            } else {
+                adBlockDot.style.opacity = '0';
+            }
         }
     }
 
@@ -1049,80 +1063,88 @@
                 currentQualityLS = localStorage.getItem(lsKeyQuality);
                 currentMutedLS = localStorage.getItem(lsKeyMuted);
                 currentVolumeLS = localStorage.getItem(lsKeyVolume);
-
-                if (localStorageHookFailed && player?.core?.state) {
-                    localStorage.setItem(lsKeyMuted, JSON.stringify({ default: player.core.state.muted }));
-                    localStorage.setItem(lsKeyVolume, String(player.core.state.volume));
-                    if (player.core.state.quality?.group) {
-                        localStorage.setItem(lsKeyQuality, JSON.stringify({ default: player.core.state.quality.group }));
-                    }
-                }
             } catch {}
 
-            console.log('[VAFT] Reloading Twitch player stream source');
-            try {
-                playerState.setSrc({ isNewMediaPlayerInstance: true, refreshAccessToken: true });
-                postTwitchWorkerMessage('TriggeredPlayerReload');
-                player.play();
-            } catch {}
+            const currentQuality = player?.getQuality?.();
+            let currentMuted = player?.isMuted?.();
+            let currentVolume = player?.getVolume?.();
 
-            if (localStorageHookFailed && (currentQualityLS || currentMutedLS || currentVolumeLS)) {
-                setTimeout(() => {
-                    try {
-                        if (currentQualityLS) localStorage.setItem(lsKeyQuality, currentQualityLS);
-                        if (currentMutedLS) localStorage.setItem(lsKeyMuted, currentMutedLS);
-                        if (currentVolumeLS) localStorage.setItem(lsKeyVolume, currentVolumeLS);
-                    } catch {}
-                }, 3000);
+            if (currentQualityLS) {
+                try {
+                    const parsed = JSON.parse(currentQualityLS);
+                    if (parsed?.quality) currentQuality = parsed.quality;
+                } catch {}
             }
+            if (currentMutedLS) {
+                try {
+                    const parsed = JSON.parse(currentMutedLS);
+                    if (typeof parsed?.muted === 'boolean') currentMuted = parsed.muted;
+                } catch {}
+            }
+            if (currentVolumeLS) {
+                try {
+                    const parsed = JSON.parse(currentVolumeLS);
+                    if (typeof parsed?.volume === 'number') currentVolume = parsed.volume;
+                } catch {}
+            }
+
+            postTwitchWorkerMessage('TriggeredPlayerReload');
+            playerState.setSrc({ isLive: true, login: playerState.props.content.login });
+
+            setTimeout(() => {
+                if (currentQuality && player.setQuality) {
+                    player.setQuality(currentQuality);
+                }
+                if (typeof currentMuted === 'boolean' && player.setMuted) {
+                    player.setMuted(currentMuted);
+                }
+                if (typeof currentVolume === 'number' && player.setVolume) {
+                    player.setVolume(currentVolume);
+                }
+            }, 100);
         }
     }
 
-    window.reloadTwitchPlayer = () => {
-        doTwitchPlayerTask(false, true);
-    };
-
     function postTwitchWorkerMessage(key, value) {
-        twitchWorkers.forEach((worker) => {
+        for (const worker of twitchWorkers) {
             try {
                 worker.postMessage({ key, value });
             } catch {}
-        });
+        }
     }
 
     async function handleWorkerFetchRequest(fetchRequest) {
+        let responseData = null;
         try {
-            const fetchFn = window.realFetch || window.fetch;
-            const response = await fetchFn(fetchRequest.url, fetchRequest.options);
-            const responseBody = await response.text();
-            return {
+            const response = await (window.realFetch || window.fetch)(fetchRequest.url, fetchRequest.options);
+            const body = await response.text();
+            responseData = {
                 id: fetchRequest.id,
                 status: response.status,
                 statusText: response.statusText,
                 headers: Object.fromEntries(response.headers.entries()),
-                body: responseBody
+                body: body
             };
-        } catch (error) {
-            return {
+        } catch (err) {
+            responseData = {
                 id: fetchRequest.id,
-                error: error.message
+                error: err.message || 'Fetch failed'
             };
         }
+        return responseData;
     }
 
-    function getHeaderValue(headers, headerName) {
+    function getHeaderValue(headers, key) {
         if (!headers) return null;
-        if (typeof headers.get === 'function') {
-            return headers.get(headerName);
-        }
-        if (Array.isArray(headers)) {
-            const entry = headers.find(([k]) => k.toLowerCase() === headerName.toLowerCase());
-            return entry ? entry[1] : null;
+        if (headers instanceof Headers) {
+            return headers.get(key);
         }
         if (typeof headers === 'object') {
-            const lower = headerName.toLowerCase();
-            for (const k of Object.keys(headers)) {
-                if (k.toLowerCase() === lower) return headers[k];
+            const lowerKey = key.toLowerCase();
+            for (const [k, v] of Object.entries(headers)) {
+                if (k.toLowerCase() === lowerKey && typeof v === 'string') {
+                    return v;
+                }
             }
         }
         return null;
@@ -1171,30 +1193,6 @@
                             AuthorizationHeader = auth;
                             postTwitchWorkerMessage('UpdateAuthorizationHeader', AuthorizationHeader);
                         }
-                    }
-
-                    if (init && typeof init.body === 'string' && init.body.includes('PlaybackAccessToken')) {
-                        try {
-                            let replaced = false;
-                            const parsedBody = JSON.parse(init.body);
-                            const items = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
-
-                            for (const item of items) {
-                                const hash = item?.extensions?.persistedQuery?.sha256Hash;
-                                if (hash && hash !== PlaybackAccessTokenSha256) {
-                                    PlaybackAccessTokenSha256 = hash;
-                                    postTwitchWorkerMessage('UpdatePlaybackAccessTokenSha256', PlaybackAccessTokenSha256);
-                                }
-                                if (ForceAccessTokenPlayerType && item?.variables?.playerType && item.variables.playerType !== ForceAccessTokenPlayerType) {
-                                    item.variables.playerType = ForceAccessTokenPlayerType;
-                                    replaced = true;
-                                }
-                            }
-
-                            if (replaced) {
-                                init.body = JSON.stringify(Array.isArray(parsedBody) ? items : items[0]);
-                            }
-                        } catch {}
                     }
                 }
                 return realFetch.apply(this, arguments);
