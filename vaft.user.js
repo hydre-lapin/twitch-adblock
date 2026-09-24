@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Ad Solutions (VAFT) - Userscript
 // @namespace    https://github.com/hydre-lapin/twitch-adblock
-// @version      2.8.0
+// @version      2.9.0
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
@@ -17,7 +17,7 @@
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 28;
+    const ourTwitchAdSolutionsVersion = 29;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -302,19 +302,9 @@
         const realFetch = fetch;
         const blankSegmentDataUrl = 'data:video/mp4;base64,AAAAKGZ0eXBtcDQyAAAAAWlzb21tcDQyZGFzaGF2YzFpc282aGxzZgAABEltb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAYagAAAAAAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAABqHRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAURtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAALuAAAAAAFXEAAAAAAAtaGRscgAAAAAAAAAAc291bgAAAAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAADvbWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAACzc3RibAAAAGdzdHNkAAAAAAAAAAEAAABXbXA0YQAAAAAAAAABAAAAAAAAAAAAAgAQAAAAALuAAAAAAAAzZXNkcwAAAAADgICAIgABAASAgIAUQBUAAAAAAAAAAAAAAAWAgIACEZAGgICAAQIAAAAQc3R0cwAAAAAAAAAAAAAAEHN0c2MAAAAAAAAAAAAAABRzdHN6AAAAAAAAAAAAAAAAAAAAEHN0Y28AAAAAAAAAAAAAAeV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAoAAAAFoAAAAAAGBbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAA9CQAAAAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABLG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAOxzdGJsAAAAoHN0c2QAAAAAAAAAAQAAAJBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAoABaABIAAAASAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGP//AAAAOmF2Y0MBTUAe/+EAI2dNQB6WUoFAX/LgLUBAQFAAAD6AAA6mDgAAHoQAA9CW7y4KAQAEaOuPIAAAABBzdHRzAAAAAAAAAAAAAAAQc3RzYwAAAAAAAAAAAAAAFHN0c3oAAAAAAAAAAAAAAAAAAAAQc3RjbwAAAAAAAAAAAAAASG12ZXgAAAAgdHJleAAAAAAAAAABAAAAAQAAAC4AAAAAAoAAAAAAACB0cmV4AAAAAAAAAAIAAAABAACCNQAAAAACQAAA';
 
-        function isAdSegmentUrl(targetUrl) {
-            if (!targetUrl || typeof targetUrl !== 'string') return false;
-            return AdSegmentCache.has(targetUrl) ||
-                   targetUrl.includes('stitched-ad') ||
-                   targetUrl.includes('/ad/') ||
-                   targetUrl.includes('twitch_ad') ||
-                   targetUrl.includes('amazon-adsystem') ||
-                   (AllSegmentsAreAdSegments && targetUrl.includes('.ts'));
-        }
-
         fetch = async function (url, options) {
             if (typeof url === 'string') {
-                if (isAdSegmentUrl(url)) {
+                if (AdSegmentCache.has(url)) {
                     return realFetch(blankSegmentDataUrl, options);
                 }
 
@@ -505,12 +495,7 @@
                 continue;
             }
 
-            const isAdSegment = (stripAllSegments && line.includes('.ts')) ||
-                                (line.startsWith('#EXTINF') && !line.includes(',live') && !line.includes(', live')) ||
-                                line.includes('stitched-ad') ||
-                                line.includes('X-TV-TWITCH-AD');
-
-            if (isAdSegment) {
+            if (i < lines.length - 1 && lines[i].startsWith('#EXTINF') && (stripAllSegments || AllSegmentsAreAdSegments)) {
                 const segmentUrl = lines[i + 1]?.trim();
                 if (segmentUrl && !AdSegmentCache.has(segmentUrl)) {
                     if (streamInfo) streamInfo.NumStrippedAdSegments++;
@@ -521,7 +506,7 @@
                 hasStrippedAdSegments = true;
             }
 
-            if (line.includes(AdSignifier) || line.includes('stitched-ad') || line.includes('X-TV-TWITCH-AD') || line.includes('Amazon') || line.includes('commercial') || line.includes('#EXT-X-DATERANGE')) {
+            if (line.includes(AdSignifier)) {
                 hasStrippedAdSegments = true;
             }
             lines[i] = line;
@@ -529,7 +514,7 @@
 
         if (hasStrippedAdSegments) {
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith('#EXT-X-TWITCH-PREFETCH:') || lines[i].startsWith('#EXT-X-DATERANGE:ID="stitched-ad')) {
+                if (lines[i].startsWith('#EXT-X-TWITCH-PREFETCH:')) {
                     lines[i] = '';
                 }
             }
@@ -598,21 +583,9 @@
         }
 
         const lines = textStr.replace(/\r/g, '').split('\n');
-        let hasNonLiveExtinf = false;
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXTINF') && !lines[i].includes(',live') && !lines[i].includes(', live')) {
-                hasNonLiveExtinf = true;
-                break;
-            }
-        }
-
         const haveAdTags = textStr.includes(AdSignifier) ||
                            textStr.includes('stitched-ad') ||
                            textStr.includes('X-TV-TWITCH-AD') ||
-                           textStr.includes('Amazon') ||
-                           textStr.includes('commercial') ||
-                           textStr.includes('#EXT-X-DATERANGE:ID="') ||
-                           hasNonLiveExtinf ||
                            SimulatedAdsDepth > 0;
 
         if (!streamInfo) {
