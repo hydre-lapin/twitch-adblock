@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Ad Solutions (VAFT) - Userscript
 // @namespace    https://github.com/hydre-lapin/twitch-adblock
-// @version      2.9.3
+// @version      2.9.4
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
@@ -17,7 +17,7 @@
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 32;
+    const ourTwitchAdSolutionsVersion = 33;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -929,7 +929,7 @@
 
     function repositionAdBlockDot() {
         const dot = document.querySelector('.vaft-ad-indicator');
-        if (!dot) return;
+        if (!dot) return false;
 
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsElement) {
@@ -939,38 +939,42 @@
             if (dot.parentElement !== fsElement) {
                 fsElement.appendChild(dot);
             }
-            return;
+            return true;
         }
 
         const video = document.querySelector('video');
         if (video) {
             const rect = video.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
+            if (rect.width > 50 && rect.height > 50) {
                 dot.style.position = 'fixed';
                 dot.style.top = `${rect.top + 16}px`;
                 dot.style.left = `${rect.left + 16}px`;
                 if (dot.parentElement !== document.body) {
                     document.body.appendChild(dot);
                 }
-                return;
+                return true;
             }
         }
 
         const playerContainer = document.querySelector('[data-a-target="player-container"]') ||
                                 document.querySelector('[data-a-target="video-player"]') ||
                                 document.querySelector('.video-player__container') ||
-                                document.querySelector('.video-ref');
+                                document.querySelector('.video-ref') ||
+                                document.querySelector('.persistent-player');
         if (playerContainer) {
             const rect = playerContainer.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
+            if (rect.width > 50 && rect.height > 50) {
                 dot.style.position = 'fixed';
                 dot.style.top = `${rect.top + 16}px`;
                 dot.style.left = `${rect.left + 16}px`;
                 if (dot.parentElement !== document.body) {
                     document.body.appendChild(dot);
                 }
+                return true;
             }
         }
+
+        return false;
     }
 
     window.addEventListener('resize', repositionAdBlockDot, { passive: true });
@@ -991,20 +995,25 @@
             adBlockDot = document.createElement('div');
             adBlockDot.className = 'vaft-ad-indicator';
             adBlockDot.title = 'Publicité en cours de contournement (VAFT)';
-            adBlockDot.style.cssText = 'width: 10px !important; height: 10px !important; background: #00f0ff !important; border-radius: 50% !important; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important; position: fixed; top: 16px; left: 16px; z-index: 999999 !important; pointer-events: none !important; opacity: 0; transition: opacity 0.4s ease !important;';
+            adBlockDot.style.cssText = 'width: 10px !important; height: 10px !important; background: #00f0ff !important; border-radius: 50% !important; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important; position: fixed; top: -100px; left: -100px; z-index: 999999 !important; pointer-events: none !important; opacity: 0; transition: opacity 0.4s ease !important;';
             document.body.appendChild(adBlockDot);
         }
 
-        repositionAdBlockDot();
+        const isPositioned = repositionAdBlockDot();
 
         if (data) {
             isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
             if (data.hasAds) {
-                adBlockDot.style.opacity = '0.9';
                 adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
-                repositionAdBlockDot();
+                if (isPositioned) {
+                    adBlockDot.style.opacity = '0.9';
+                }
                 if (!adBlockRepositionInterval) {
-                    adBlockRepositionInterval = setInterval(repositionAdBlockDot, 400);
+                    adBlockRepositionInterval = setInterval(() => {
+                        if (repositionAdBlockDot()) {
+                            adBlockDot.style.opacity = '0.9';
+                        }
+                    }, 200);
                 }
             } else {
                 adBlockDot.style.opacity = '0';
