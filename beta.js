@@ -5,7 +5,7 @@ twitch-videoad.js application/javascript
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 29;
+    const ourTwitchAdSolutionsVersion = 30;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -913,6 +913,69 @@ twitch-videoad.js application/javascript
         setTimeout(monitorPlayerBuffering, PlayerBufferingDelay);
     }
 
+    function ensureIndicatorStyles() {
+        if (document.getElementById('vaft-indicator-style')) return;
+        const style = document.createElement('style');
+        style.id = 'vaft-indicator-style';
+        style.textContent = `
+            .vaft-ad-indicator {
+                width: 10px !important;
+                height: 10px !important;
+                background: #00f0ff !important;
+                border-radius: 50% !important;
+                box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important;
+                position: absolute !important;
+                top: 16px !important;
+                left: 16px !important;
+                z-index: 999999 !important;
+                pointer-events: none !important;
+                opacity: 0;
+                transition: opacity 0.4s ease !important;
+            }
+            [data-a-target="video-player"],
+            .video-player__container,
+            .video-player,
+            .highwinds-player {
+                position: relative !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+
+    function getPlayerRoot() {
+        const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsElement) {
+            return fsElement.querySelector?.('.video-player__overlay, [data-a-target="video-player"], .video-player__container, .video-player') || fsElement;
+        }
+        const overlay = document.querySelector('.video-player__overlay');
+        if (overlay) return overlay;
+
+        const video = document.querySelector('video');
+        if (video) {
+            const playerContainer = video.closest('.video-player__container, [data-a-target="video-player"], .video-player, .highwinds-player') || video.parentElement;
+            if (playerContainer) return playerContainer;
+        }
+        return document.querySelector('[data-a-target="video-player"]') ||
+               document.querySelector('.video-player__container') ||
+               document.querySelector('.video-player') ||
+               document.querySelector('.highwinds-player');
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        const dot = document.querySelector('.vaft-ad-indicator');
+        const root = getPlayerRoot();
+        if (dot && root && dot.parentElement !== root) {
+            root.appendChild(dot);
+        }
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+        const dot = document.querySelector('.vaft-ad-indicator');
+        const root = getPlayerRoot();
+        if (dot && root && dot.parentElement !== root) {
+            root.appendChild(dot);
+        }
+    });
+
     function updateAdblockBanner(data) {
         if (!ShowAdBlockBanner) {
             if (data) {
@@ -921,29 +984,32 @@ twitch-videoad.js application/javascript
             return;
         }
 
-        let adBlockDot = document.querySelector('.vaft-ad-indicator');
-        if (!adBlockDot) {
-            const playerRootDiv = document.querySelector('.video-player') ||
-                                  document.querySelector('[data-a-target="video-player"]') ||
-                                  document.querySelector('.video-player__container') ||
-                                  document.querySelector('.highwinds-player') ||
-                                  document.querySelector('main') ||
-                                  document.body;
-            if (!playerRootDiv) return;
+        ensureIndicatorStyles();
 
+        let adBlockDot = document.querySelector('.vaft-ad-indicator');
+        const playerRootDiv = getPlayerRoot();
+
+        if (!adBlockDot && playerRootDiv) {
             adBlockDot = document.createElement('div');
             adBlockDot.className = 'vaft-ad-indicator';
             adBlockDot.title = 'Publicité en cours de contournement (VAFT)';
-            adBlockDot.style.cssText = 'width: 10px; height: 10px; background: #00f0ff; border-radius: 50%; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7); position: absolute; top: 16px; left: 16px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.4s ease;';
+            playerRootDiv.appendChild(adBlockDot);
+        } else if (adBlockDot && playerRootDiv && adBlockDot.parentElement !== playerRootDiv) {
             playerRootDiv.appendChild(adBlockDot);
         }
 
         if (data) {
             isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
             if (data.hasAds) {
-                adBlockDot.style.opacity = '0.9';
-                adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
-            } else {
+                if (!adBlockDot && !playerRootDiv) {
+                    setTimeout(() => updateAdblockBanner(data), 500);
+                    return;
+                }
+                if (adBlockDot) {
+                    adBlockDot.style.opacity = '0.9';
+                    adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
+                }
+            } else if (adBlockDot) {
                 adBlockDot.style.opacity = '0';
             }
         }
