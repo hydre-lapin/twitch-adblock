@@ -5,7 +5,7 @@ twitch-videoad.js application/javascript
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 30;
+    const ourTwitchAdSolutionsVersion = 31;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -932,8 +932,11 @@ twitch-videoad.js application/javascript
                 opacity: 0;
                 transition: opacity 0.4s ease !important;
             }
-            [data-a-target="video-player"],
+            .video-player__overlay,
+            .video-ref,
             .video-player__container,
+            [data-a-target="video-player"],
+            [data-a-target="player-container"],
             .video-player,
             .highwinds-player {
                 position: relative !important;
@@ -945,17 +948,18 @@ twitch-videoad.js application/javascript
     function getPlayerRoot() {
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsElement) {
-            return fsElement.querySelector?.('.video-player__overlay, [data-a-target="video-player"], .video-player__container, .video-player') || fsElement;
+            return fsElement.querySelector?.('.video-player__overlay, [data-a-target="video-player"], [data-a-target="player-container"], .video-player__container, .video-player, .video-ref') || fsElement;
         }
-        const overlay = document.querySelector('.video-player__overlay');
-        if (overlay) return overlay;
 
         const video = document.querySelector('video');
         if (video) {
-            const playerContainer = video.closest('.video-player__container, [data-a-target="video-player"], .video-player, .highwinds-player') || video.parentElement;
+            const playerContainer = video.closest('.video-player__overlay, [data-a-target="video-player"], [data-a-target="player-container"], .video-player__container, .video-player, .video-ref') || video.parentElement;
             if (playerContainer) return playerContainer;
         }
-        return document.querySelector('[data-a-target="video-player"]') ||
+
+        return document.querySelector('.video-player__overlay') ||
+               document.querySelector('[data-a-target="video-player"]') ||
+               document.querySelector('[data-a-target="player-container"]') ||
                document.querySelector('.video-player__container') ||
                document.querySelector('.video-player') ||
                document.querySelector('.highwinds-player');
@@ -989,10 +993,15 @@ twitch-videoad.js application/javascript
         let adBlockDot = document.querySelector('.vaft-ad-indicator');
         const playerRootDiv = getPlayerRoot();
 
+        if (playerRootDiv) {
+            playerRootDiv.style.setProperty('position', 'relative', 'important');
+        }
+
         if (!adBlockDot && playerRootDiv) {
             adBlockDot = document.createElement('div');
             adBlockDot.className = 'vaft-ad-indicator';
             adBlockDot.title = 'Publicité en cours de contournement (VAFT)';
+            adBlockDot.style.cssText = 'width: 10px !important; height: 10px !important; background: #00f0ff !important; border-radius: 50% !important; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important; position: absolute !important; top: 16px !important; left: 16px !important; z-index: 999999 !important; pointer-events: none !important; opacity: 0; transition: opacity 0.4s ease !important;';
             playerRootDiv.appendChild(adBlockDot);
         } else if (adBlockDot && playerRootDiv && adBlockDot.parentElement !== playerRootDiv) {
             playerRootDiv.appendChild(adBlockDot);
