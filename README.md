@@ -1,7 +1,7 @@
 # 🛡️ Twitch Ad Solutions (VAFT Enhanced)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.9.2-blue.svg?style=for-the-badge" alt="Version 2.9.2" />
+  <img src="https://img.shields.io/badge/version-2.9.3-blue.svg?style=for-the-badge" alt="Version 2.9.3" />
   <img src="https://img.shields.io/badge/Twitch-AdBlock-9146FF?style=for-the-badge&logo=twitch&logoColor=white" alt="Twitch" />
   <img src="https://img.shields.io/badge/uBlock_Origin-Compatible-800000?style=for-the-badge&logo=ublockorigin&logoColor=white" alt="uBlock Origin" />
   <img src="https://img.shields.io/badge/Tampermonkey-Compatible-00485B?style=for-the-badge&logo=tampermonkey&logoColor=white" alt="Tampermonkey" />

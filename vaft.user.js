@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Ad Solutions (VAFT) - Userscript
 // @namespace    https://github.com/hydre-lapin/twitch-adblock
-// @version      2.9.2
+// @version      2.9.3
 // @description  Stream ad blocker for Twitch without stutters, black screens or buffering loops
 // @match        https://*.twitch.tv/*
 // @run-at       document-start
@@ -17,7 +17,7 @@
     }
     'use strict';
 
-    const ourTwitchAdSolutionsVersion = 31;
+    const ourTwitchAdSolutionsVersion = 32;
     const globalContext = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     if (typeof globalContext.twitchAdSolutionsVersion !== 'undefined' && globalContext.twitchAdSolutionsVersion >= ourTwitchAdSolutionsVersion) {
         console.log(`[VAFT] Skipping as another version is already active (${globalContext.twitchAdSolutionsVersion})`);
@@ -925,72 +925,58 @@
         setTimeout(monitorPlayerBuffering, PlayerBufferingDelay);
     }
 
-    function ensureIndicatorStyles() {
-        if (document.getElementById('vaft-indicator-style')) return;
-        const style = document.createElement('style');
-        style.id = 'vaft-indicator-style';
-        style.textContent = `
-            .vaft-ad-indicator {
-                width: 10px !important;
-                height: 10px !important;
-                background: #00f0ff !important;
-                border-radius: 50% !important;
-                box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important;
-                position: absolute !important;
-                top: 16px !important;
-                left: 16px !important;
-                z-index: 999999 !important;
-                pointer-events: none !important;
-                opacity: 0;
-                transition: opacity 0.4s ease !important;
-            }
-            .video-player__overlay,
-            .video-ref,
-            .video-player__container,
-            [data-a-target="video-player"],
-            [data-a-target="player-container"],
-            .video-player,
-            .highwinds-player {
-                position: relative !important;
-            }
-        `;
-        (document.head || document.documentElement).appendChild(style);
-    }
+    let adBlockRepositionInterval = null;
 
-    function getPlayerRoot() {
+    function repositionAdBlockDot() {
+        const dot = document.querySelector('.vaft-ad-indicator');
+        if (!dot) return;
+
         const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsElement) {
-            return fsElement.querySelector?.('.video-player__overlay, [data-a-target="video-player"], [data-a-target="player-container"], .video-player__container, .video-player, .video-ref') || fsElement;
+            dot.style.position = 'absolute';
+            dot.style.top = '16px';
+            dot.style.left = '16px';
+            if (dot.parentElement !== fsElement) {
+                fsElement.appendChild(dot);
+            }
+            return;
         }
 
         const video = document.querySelector('video');
         if (video) {
-            const playerContainer = video.closest('.video-player__overlay, [data-a-target="video-player"], [data-a-target="player-container"], .video-player__container, .video-player, .video-ref') || video.parentElement;
-            if (playerContainer) return playerContainer;
+            const rect = video.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                dot.style.position = 'fixed';
+                dot.style.top = `${rect.top + 16}px`;
+                dot.style.left = `${rect.left + 16}px`;
+                if (dot.parentElement !== document.body) {
+                    document.body.appendChild(dot);
+                }
+                return;
+            }
         }
 
-        return document.querySelector('.video-player__overlay') ||
-               document.querySelector('[data-a-target="video-player"]') ||
-               document.querySelector('[data-a-target="player-container"]') ||
-               document.querySelector('.video-player__container') ||
-               document.querySelector('.video-player') ||
-               document.querySelector('.highwinds-player');
+        const playerContainer = document.querySelector('[data-a-target="player-container"]') ||
+                                document.querySelector('[data-a-target="video-player"]') ||
+                                document.querySelector('.video-player__container') ||
+                                document.querySelector('.video-ref');
+        if (playerContainer) {
+            const rect = playerContainer.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                dot.style.position = 'fixed';
+                dot.style.top = `${rect.top + 16}px`;
+                dot.style.left = `${rect.left + 16}px`;
+                if (dot.parentElement !== document.body) {
+                    document.body.appendChild(dot);
+                }
+            }
+        }
     }
 
-    document.addEventListener('fullscreenchange', () => {
-        const dot = document.querySelector('.vaft-ad-indicator');
-        const root = getPlayerRoot();
-        if (dot && root && dot.parentElement !== root) {
-            root.appendChild(dot);
-        }
-    });
-    document.addEventListener('webkitfullscreenchange', () => {
-        const dot = document.querySelector('.vaft-ad-indicator');
-        const root = getPlayerRoot();
-        if (dot && root && dot.parentElement !== root) {
-            root.appendChild(dot);
-        }
-    });
+    window.addEventListener('resize', repositionAdBlockDot, { passive: true });
+    window.addEventListener('scroll', repositionAdBlockDot, { passive: true });
+    document.addEventListener('fullscreenchange', repositionAdBlockDot);
+    document.addEventListener('webkitfullscreenchange', repositionAdBlockDot);
 
     function updateAdblockBanner(data) {
         if (!ShowAdBlockBanner) {
@@ -1000,38 +986,32 @@
             return;
         }
 
-        ensureIndicatorStyles();
-
         let adBlockDot = document.querySelector('.vaft-ad-indicator');
-        const playerRootDiv = getPlayerRoot();
-
-        if (playerRootDiv) {
-            playerRootDiv.style.setProperty('position', 'relative', 'important');
-        }
-
-        if (!adBlockDot && playerRootDiv) {
+        if (!adBlockDot) {
             adBlockDot = document.createElement('div');
             adBlockDot.className = 'vaft-ad-indicator';
             adBlockDot.title = 'Publicité en cours de contournement (VAFT)';
-            adBlockDot.style.cssText = 'width: 10px !important; height: 10px !important; background: #00f0ff !important; border-radius: 50% !important; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important; position: absolute !important; top: 16px !important; left: 16px !important; z-index: 999999 !important; pointer-events: none !important; opacity: 0; transition: opacity 0.4s ease !important;';
-            playerRootDiv.appendChild(adBlockDot);
-        } else if (adBlockDot && playerRootDiv && adBlockDot.parentElement !== playerRootDiv) {
-            playerRootDiv.appendChild(adBlockDot);
+            adBlockDot.style.cssText = 'width: 10px !important; height: 10px !important; background: #00f0ff !important; border-radius: 50% !important; box-shadow: 0 0 8px #00f0ff, 0 0 16px rgba(0, 240, 255, 0.7) !important; position: fixed; top: 16px; left: 16px; z-index: 999999 !important; pointer-events: none !important; opacity: 0; transition: opacity 0.4s ease !important;';
+            document.body.appendChild(adBlockDot);
         }
+
+        repositionAdBlockDot();
 
         if (data) {
             isActivelyStrippingAds = Boolean(data.isStrippingAdSegments);
             if (data.hasAds) {
-                if (!adBlockDot && !playerRootDiv) {
-                    setTimeout(() => updateAdblockBanner(data), 500);
-                    return;
+                adBlockDot.style.opacity = '0.9';
+                adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
+                repositionAdBlockDot();
+                if (!adBlockRepositionInterval) {
+                    adBlockRepositionInterval = setInterval(repositionAdBlockDot, 400);
                 }
-                if (adBlockDot) {
-                    adBlockDot.style.opacity = '0.9';
-                    adBlockDot.title = data.isMidroll ? 'Publicité midroll bloquée (VAFT)' : 'Publicité pré-roll bloquée (VAFT)';
-                }
-            } else if (adBlockDot) {
+            } else {
                 adBlockDot.style.opacity = '0';
+                if (adBlockRepositionInterval) {
+                    clearInterval(adBlockRepositionInterval);
+                    adBlockRepositionInterval = null;
+                }
             }
         }
     }
